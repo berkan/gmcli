@@ -15,7 +15,7 @@
 		"build": "tsc && chmod +x dist/cli.js",
 		"check": "biome check src/ --write --diagnostic-level=error && tsgo --noEmit",
 		"prepublishOnly": "npm run build",
-		"prepare": "husky"
+		"prepare": "husky || true"
 	},
 	"dependencies": {
 		"google-auth-library": "^10.1.0",
