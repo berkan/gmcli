@@ -2,9 +2,11 @@
 
 import * as fs from "fs";
 import { parseArgs } from "util";
+import { handleApprovalCommand, requireApproval } from "./approval.js";
 import { GmailService } from "./gmail-service.js";
 
 const service = new GmailService();
+const TOOL = "gmcli";
 
 // Global JSON output flag
 let jsonOutput = false;
@@ -27,6 +29,19 @@ ACCOUNT COMMANDS
   gmcli accounts list                        List configured accounts
   gmcli accounts add <email> [--manual]      Add account (--manual for browserless OAuth)
   gmcli accounts remove <email>              Remove account
+  gmcli accounts reauth [emails...] [--manual]
+                                             Re-authorize accounts (all if none given)
+
+APPROVAL
+
+  Irreversible actions (send, drafts send, drafts delete, labelling TRASH/SPAM)
+  print what they will do and wait for human approval: Touch ID on the macOS
+  host (directly, or via the gauth broker from a container), falling back to a
+  passphrase typed on the terminal. See gauth-host/README.md.
+
+  gmcli approval set-passphrase              Set the fallback passphrase
+  gmcli approval status                      Show which approval methods are available
+  gmcli approval test                        Run a test approval
 
 GMAIL COMMANDS
 
@@ -136,6 +151,10 @@ async function main() {
 			await handleAccounts(rest);
 			return;
 		}
+		if (first === "approval") {
+			await handleApprovalCommand(TOOL, rest);
+			return;
+		}
 
 		// All other commands: first arg is email, second is command
 		const account = first;
@@ -169,13 +188,17 @@ async function main() {
 				error(`Unknown command: ${command}`);
 		}
 	} catch (e) {
-		error(e instanceof Error ? e.message : String(e));
+		const msg = e instanceof Error ? e.message : String(e);
+		if (msg.includes("invalid_grant")) {
+			error(`${msg}\nToken expired or revoked. Run: ${TOOL} accounts reauth ${first}`);
+		}
+		error(msg);
 	}
 }
 
 async function handleAccounts(args: string[]) {
 	const action = args[0];
-	if (!action) error("Missing action: list|add|remove|credentials");
+	if (!action) error("Missing action: list|add|remove|reauth|credentials");
 
 	switch (action) {
 		case "list": {
@@ -217,6 +240,18 @@ async function handleAccounts(args: string[]) {
 			if (!email) error("Usage: accounts remove <email>");
 			const deleted = service.deleteAccount(email);
 			console.log(deleted ? `Removed '${email}'` : `Not found: ${email}`);
+			break;
+		}
+		case "reauth": {
+			const manual = args.includes("--manual");
+			const emails = args.slice(1).filter((a) => a !== "--manual");
+			const targets = emails.length > 0 ? emails : service.listAccounts().map((a) => a.email);
+			if (targets.length === 0) error("No accounts configured");
+			for (const email of targets) {
+				console.log(`Re-authorizing '${email}'...`);
+				await service.reauthAccount(email, manual);
+				console.log(`Account '${email}' re-authorized`);
+			}
 			break;
 		}
 		default:
@@ -394,6 +429,17 @@ async function handleLabels(account: string, args: string[]) {
 	const addLabels = values.add ? service.resolveLabelIds(values.add.split(","), nameToId) : [];
 	const removeLabels = values.remove ? service.resolveLabelIds(values.remove.split(","), nameToId) : [];
 
+	// Trashing/spamming is the only label change that destroys mail (auto-purged after 30 days)
+	const destructive = addLabels.filter((l) => l === "TRASH" || l === "SPAM");
+	if (destructive.length > 0) {
+		await requireApproval({
+			tool: TOOL,
+			account,
+			action: `labels --add ${destructive.join(",")}`,
+			details: [`Threads: ${threadIds.join(", ")}`],
+		});
+	}
+
 	const results = await service.modifyLabels(account, threadIds, addLabels, removeLabels);
 
 	for (const r of results) {
@@ -462,6 +508,12 @@ async function handleDrafts(account: string, args: string[]) {
 		case "delete": {
 			const draftId = rest[0];
 			if (!draftId) error("Usage: <email> drafts delete <draftId>");
+			await requireApproval({
+				tool: TOOL,
+				account,
+				action: "drafts delete",
+				details: await describeDraft(account, draftId),
+			});
 			await service.deleteDraft(account, draftId);
 			console.log("Deleted");
 			break;
@@ -469,6 +521,12 @@ async function handleDrafts(account: string, args: string[]) {
 		case "send": {
 			const draftId = rest[0];
 			if (!draftId) error("Usage: <email> drafts send <draftId>");
+			await requireApproval({
+				tool: TOOL,
+				account,
+				action: "drafts send",
+				details: await describeDraft(account, draftId),
+			});
 			const msg = await service.sendDraft(account, draftId);
 			console.log(`Sent: ${msg.id}`);
 			break;
@@ -523,6 +581,15 @@ async function handleSend(account: string, args: string[]) {
 		error("Usage: <email> send --to <emails> --subject <subj> --body <body>");
 	}
 
+	const details = [`To: ${values.to}`];
+	if (values.cc) details.push(`Cc: ${values.cc}`);
+	if (values.bcc) details.push(`Bcc: ${values.bcc}`);
+	details.push(`Subject: ${values.subject}`);
+	if (values["reply-to"]) details.push(`Reply to message: ${values["reply-to"]}`);
+	if (values.attach?.length) details.push(`Attachments: ${values.attach.join(", ")}`);
+	details.push(`Body: ${preview(values.body)}`);
+	await requireApproval({ tool: TOOL, account, action: "send", details });
+
 	const msg = await service.sendMessage(account, values.to.split(","), values.subject, values.body, {
 		cc: values.cc?.split(","),
 		bcc: values.bcc?.split(","),
@@ -530,6 +597,26 @@ async function handleSend(account: string, args: string[]) {
 		attachments: values.attach,
 	});
 	console.log(`Sent: ${msg.id}`);
+}
+
+function preview(text: string, max = 200): string {
+	const oneLine = text.replace(/\s+/g, " ").trim();
+	return oneLine.length <= max ? oneLine : `${oneLine.slice(0, max)}…`;
+}
+
+/** Human-readable summary of a draft, for approval prompts. */
+async function describeDraft(account: string, draftId: string): Promise<string[]> {
+	const draft = await service.getDraft(account, draftId);
+	const headers = draft.message?.payload?.headers || [];
+	const getHeader = (name: string) =>
+		headers.find((h: any) => h.name?.toLowerCase() === name.toLowerCase())?.value || "";
+	const details = [`Draft: ${draftId}`, `To: ${getHeader("to")}`];
+	if (getHeader("cc")) details.push(`Cc: ${getHeader("cc")}`);
+	details.push(`Subject: ${getHeader("subject")}`);
+	const attachments = getAttachments(draft.message?.payload);
+	if (attachments.length > 0) details.push(`Attachments: ${attachments.map((a) => a.filename).join(", ")}`);
+	details.push(`Body: ${preview(decodeBody(draft.message?.payload))}`);
+	return details;
 }
 
 function handleUrl(account: string, args: string[]) {

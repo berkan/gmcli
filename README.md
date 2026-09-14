@@ -192,3 +192,17 @@ git push --tags
 ## License
 
 MIT
+
+## Fork additions (berkan)
+
+Fork of [badlogic/gmcli](https://github.com/badlogic/gmcli). Two changes:
+
+- `gmcli accounts reauth [emails...] [--manual]` re-runs OAuth for the given accounts (all if none) and replaces the
+  stored refresh token in place. `invalid_grant` errors print this command. (Weekly expiry is caused by the OAuth
+  app being in "Testing" status; setting it to "In production" in the Cloud Console removes it.)
+- Irreversible actions (`send`, `drafts send`, `drafts delete`, `labels --add TRASH/SPAM`) print what they will do and block for human approval: Touch ID on the
+  macOS host, directly or via the `gauth` broker from a container, with a passphrase typed on `/dev/tty` as fallback.
+  `gmcli approval status | test | set-passphrase`. The gate is `src/approval.ts`, identical across gmcli/gccli/gdcli;
+  the host side (Swift Touch ID helper + Node broker) lives in the separate `gauth-host` repo.
+
+Install from source: `npm install && npm run build && npm i -g .`
