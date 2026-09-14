@@ -67,6 +67,7 @@ export class GmailService {
 		}
 		const oauthFlow = new GmailOAuthFlow(account.oauth2.clientId, account.oauth2.clientSecret);
 		const refreshToken = await oauthFlow.authorize(manual);
+		await this.verifyIdentity(email, account.oauth2.clientId, account.oauth2.clientSecret, refreshToken);
 		this.accountStorage.addAccount({
 			email,
 			oauth2: { clientId: account.oauth2.clientId, clientSecret: account.oauth2.clientSecret, refreshToken },
@@ -81,6 +82,7 @@ export class GmailService {
 
 		const oauthFlow = new GmailOAuthFlow(clientId, clientSecret);
 		const refreshToken = await oauthFlow.authorize(manual);
+		await this.verifyIdentity(email, clientId, clientSecret, refreshToken);
 
 		const account: EmailAccount = {
 			email,
@@ -105,6 +107,18 @@ export class GmailService {
 
 	getCredentials(): { clientId: string; clientSecret: string } | null {
 		return this.accountStorage.getCredentials();
+	}
+
+	/** Ensure the Google account that granted the token is the one we are about to store it under. */
+	private async verifyIdentity(email: string, clientId: string, clientSecret: string, refreshToken: string) {
+		const oauth2Client = new OAuth2Client(clientId, clientSecret, "http://localhost");
+		oauth2Client.setCredentials({ refresh_token: refreshToken });
+		const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+		const profile = await gmail.users.getProfile({ userId: "me" });
+		const actual = profile.data.emailAddress || "";
+		if (actual.toLowerCase() !== email.toLowerCase()) {
+			throw new Error(`Authorized as '${actual}' but expected '${email}'. Token not saved.`);
+		}
 	}
 
 	private getGmailClient(email: string): any {

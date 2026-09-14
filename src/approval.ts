@@ -24,7 +24,7 @@ const HELPER_PATH = path.join(GAUTH_DIR, "bin", "gauth-touchid");
 const BROKER_URL = process.env.GAUTH_BROKER_URL || "http://host.docker.internal:7331";
 const HELPER_TIMEOUT_MS = 120_000;
 const BROKER_TIMEOUT_MS = 150_000;
-const MAX_REASON_LENGTH = 400;
+const MAX_REASON_LENGTH = 800; // must match MAX_REASON in gauth-host/broker.mjs
 const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1 };
 
 export interface ApprovalRequest {
@@ -38,11 +38,18 @@ export class ApprovalDenied extends Error {}
 
 export async function requireApproval(req: ApprovalRequest): Promise<void> {
 	const summary = `${req.tool} ${req.action} as ${req.account}`;
-	const reason = truncate([summary, ...req.details].join(" | "), MAX_REASON_LENGTH);
+	const reason = [summary, ...req.details].join(" | ");
 
 	console.error("");
 	console.error(`APPROVAL REQUIRED: ${summary}`);
 	for (const d of req.details) console.error(`  ${d}`);
+
+	// Never truncate: a dialog that hides a recipient or a file name is worse than no dialog.
+	if (reason.length > MAX_REASON_LENGTH) {
+		throw new Error(
+			`Approval summary is ${reason.length} characters; the dialog can show at most ${MAX_REASON_LENGTH}. Split the action into smaller ones.`,
+		);
+	}
 
 	if (fs.existsSync(HELPER_PATH)) {
 		const result = runHelper(reason);
@@ -279,8 +286,4 @@ async function brokerHealth(): Promise<string> {
 	} catch (e) {
 		return `unreachable: ${e instanceof Error ? e.message : e}`;
 	}
-}
-
-function truncate(s: string, max: number): string {
-	return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
 }

@@ -612,6 +612,7 @@ async function describeDraft(account: string, draftId: string): Promise<string[]
 		headers.find((h: any) => h.name?.toLowerCase() === name.toLowerCase())?.value || "";
 	const details = [`Draft: ${draftId}`, `To: ${getHeader("to")}`];
 	if (getHeader("cc")) details.push(`Cc: ${getHeader("cc")}`);
+	if (getHeader("bcc")) details.push(`Bcc: ${getHeader("bcc")}`);
 	details.push(`Subject: ${getHeader("subject")}`);
 	const attachments = getAttachments(draft.message?.payload);
 	if (attachments.length > 0) details.push(`Attachments: ${attachments.map((a) => a.filename).join(", ")}`);
