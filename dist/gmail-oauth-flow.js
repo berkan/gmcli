@@ -1,5 +1,7 @@
 import { spawn } from "child_process";
+import * as fs from "fs";
 import * as http from "http";
+import * as path from "path";
 import * as readline from "readline";
 import * as url from "url";
 import { OAuth2Client } from "google-auth-library";
@@ -13,7 +15,12 @@ export class GmailOAuthFlow {
         this.oauth2Client = new OAuth2Client(clientId, clientSecret);
     }
     async authorize(manual = false) {
-        const result = manual ? await this.startManualFlow() : await this.startAuthFlow();
+        const useManual = manual || !findBrowserOpener();
+        if (useManual && !manual) {
+            console.log("No browser opener found ($BROWSER unset, no xdg-open); using the manual flow.");
+            console.log("");
+        }
+        const result = useManual ? await this.startManualFlow() : await this.startAuthFlow();
         if (!result.success) {
             throw new Error(result.error || "Authorization failed");
         }
@@ -131,8 +138,34 @@ export class GmailOAuthFlow {
         }
     }
     openBrowser(url) {
-        const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-        spawn(cmd, [url], { detached: true, stdio: "ignore" });
+        const cmd = findBrowserOpener();
+        if (!cmd)
+            return;
+        const child = spawn(cmd, [url], { detached: true, stdio: "ignore", shell: process.platform === "win32" });
+        child.on("error", () => { });
+        child.unref();
     }
+}
+function findBrowserOpener() {
+    if (process.platform === "darwin")
+        return "open";
+    if (process.platform === "win32")
+        return "start";
+    const browser = process.env.BROWSER?.split(":")[0];
+    if (browser && onPath(browser))
+        return browser;
+    return onPath("xdg-open") ? "xdg-open" : null;
+}
+function onPath(cmd) {
+    const candidates = cmd.includes("/") ? [cmd] : (process.env.PATH || "").split(":").map((d) => path.join(d, cmd));
+    return candidates.some((c) => {
+        try {
+            fs.accessSync(c, fs.constants.X_OK);
+            return fs.statSync(c).isFile();
+        }
+        catch {
+            return false;
+        }
+    });
 }
 //# sourceMappingURL=gmail-oauth-flow.js.map
