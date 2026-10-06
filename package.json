@@ -18,8 +18,8 @@
 		"prepare": "husky || true"
 	},
 	"dependencies": {
-		"google-auth-library": "^10.1.0",
-		"googleapis": "^153.0.0"
+		"@googleapis/gmail": "^18.0.0",
+		"google-auth-library": "^10.1.0"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.4",

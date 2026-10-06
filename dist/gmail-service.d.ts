@@ -1,4 +1,4 @@
-import { type gmail_v1 } from "googleapis";
+import { type gmail_v1 } from "@googleapis/gmail";
 import type { EmailAccount } from "./types.js";
 type GmailMessage = gmail_v1.Schema$Message;
 type GmailThread = gmail_v1.Schema$Thread;

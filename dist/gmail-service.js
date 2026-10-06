@@ -1,8 +1,8 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { gmail as gmailApi } from "@googleapis/gmail";
 import { OAuth2Client } from "google-auth-library";
-import { google } from "googleapis";
 import { AccountStorage } from "./account-storage.js";
 import { GmailOAuthFlow } from "./gmail-oauth-flow.js";
 export class GmailService {
@@ -53,7 +53,7 @@ export class GmailService {
     async verifyIdentity(email, clientId, clientSecret, refreshToken) {
         const oauth2Client = new OAuth2Client(clientId, clientSecret, "http://localhost");
         oauth2Client.setCredentials({ refresh_token: refreshToken });
-        const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+        const gmail = gmailApi({ version: "v1", auth: oauth2Client });
         const profile = await gmail.users.getProfile({ userId: "me" });
         const actual = profile.data.emailAddress || "";
         if (actual.toLowerCase() !== email.toLowerCase()) {
@@ -71,7 +71,7 @@ export class GmailService {
                 refresh_token: account.oauth2.refreshToken,
                 access_token: account.oauth2.accessToken,
             });
-            const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+            const gmail = gmailApi({ version: "v1", auth: oauth2Client });
             this.gmailClients.set(email, gmail);
         }
         return this.gmailClients.get(email);
