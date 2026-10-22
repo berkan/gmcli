@@ -5,7 +5,13 @@ import * as path from "path";
 import * as readline from "readline";
 import * as url from "url";
 import { OAuth2Client } from "google-auth-library";
-const SCOPES = ["https://mail.google.com/"];
+// Same scopes in gmcli, gccli and gdcli: they share one token store (~/.gccli and ~/.gdcli are symlinks
+// to ~/.gmcli), so signing in with any of them must yield a token that works for all three.
+const SCOPES = [
+    "https://mail.google.com/",
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/drive",
+];
 const TIMEOUT_MS = 2 * 60 * 1000;
 export class GmailOAuthFlow {
     oauth2Client;
